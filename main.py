@@ -21,10 +21,126 @@ TXB0DLC  = 0x35
 TXB0D0   = 0x36
 CMD_RTS  = 0x80  # Request to send on TXB0
 
+#odrive registers host -> odrive and odrive <- host
+CMD_VEL_LIMIT = 0x11
+CMD_ACCEL_DECEL = 0x12
+CMD_Traj_Inertia = 0x13
+CMD_velocity_limit = 0x0f
+CMD_Pos_Gain = 0x1a
+CMD_Velocity_Gain = 0x1b
+CMD_CLEAR_ERROR = 0x18
+CMD_Set_Controller_Mode = 0x0b
+
 # SPI Setup
 cs = Pin(13, Pin.OUT)
 spi = SPI(1, sck=Pin(10), mosi=Pin(11), miso=Pin(12), baudrate=500000)
 cs.value(1)
+
+
+def velocity_gain(node_id, vel_gain):
+    Cmd_vel_gain = CMD_Velocity_Gain
+    can_id = (node_id << 5) | Cmd_vel_gain
+
+    # CAN ID into TXB0SIDH/SIDL (standard ID, 11-bit)
+    sid_high = (can_id >> 3) & 0xFF
+    sid_low = (can_id & 0x07) << 5
+
+    mcp_write(0x31, bytearray([sid_high]))  # TXB0SIDH
+    mcp_write(0x32, bytearray([sid_low]))  # TXB0SIDL
+
+    # Encode the payload: 2 floats (little endian)
+    payload = struct.pack("<f", vel_gain)
+    mcp_write(0x36, payload)  # TXB0D0
+    mcp_write(0x35, bytearray([8]))  # TXB0DLC (8 bytes)
+
+    # Request to send TXB0
+    cs.value(0)
+    spi.write(bytearray([CMD_RTS_TX0]))
+    cs.value(1)
+
+def position_gain(node_id, pos_gain):
+    Cmd_pos_gain = CMD_Pos_Gain
+    can_id = (node_id << 5) | Cmd_pos_gain
+
+    # CAN ID into TXB0SIDH/SIDL (standard ID, 11-bit)
+    sid_high = (can_id >> 3) & 0xFF
+    sid_low = (can_id & 0x07) << 5
+
+    mcp_write(0x31, bytearray([sid_high]))  # TXB0SIDH
+    mcp_write(0x32, bytearray([sid_low]))  # TXB0SIDL
+
+    # Encode the payload: 2 floats (little endian)
+    payload = struct.pack("<f", pos_gain)
+    mcp_write(0x36, payload)  # TXB0D0
+    mcp_write(0x35, bytearray([8]))  # TXB0DLC (8 bytes)
+
+    # Request to send TXB0
+    cs.value(0)
+    spi.write(bytearray([CMD_RTS_TX0]))
+    cs.value(1)
+
+def vel_current_limit(node_id, velocity_limit, current_limit):
+    Cmd_VEL_LIMIT = CMD_velocity_limit
+    can_id = (node_id << 5) | Cmd_VEL_LIMIT
+
+    # CAN ID into TXB0SIDH/SIDL (standard ID, 11-bit)
+    sid_high = (can_id >> 3) & 0xFF
+    sid_low = (can_id & 0x07) << 5
+
+    mcp_write(0x31, bytearray([sid_high]))  # TXB0SIDH
+    mcp_write(0x32, bytearray([sid_low]))  # TXB0SIDL
+
+    # Encode the payload: 2 floats (little endian)
+    payload = struct.pack("<ff", velocity_limit, current_limit)
+    mcp_write(0x36, payload)  # TXB0D0
+    mcp_write(0x35, bytearray([8]))  # TXB0DLC (8 bytes)
+
+    # Request to send TXB0
+    cs.value(0)
+    spi.write(bytearray([CMD_RTS_TX0]))
+    cs.value(1)
+
+def traj_parameter(node_id, cmd_parameter, value):
+    Cmd_VEL_LIMIT = cmd_parameter
+    can_id = (node_id << 5) | Cmd_VEL_LIMIT
+
+    # CAN ID into TXB0SIDH/SIDL (standard ID, 11-bit)
+    sid_high = (can_id >> 3) & 0xFF
+    sid_low = (can_id & 0x07) << 5
+
+    mcp_write(0x31, bytearray([sid_high]))  # TXB0SIDH
+    mcp_write(0x32, bytearray([sid_low]))   # TXB0SIDL
+
+    # Encode the payload: 2 floats (little endian)
+    payload = struct.pack("<f", value)
+    mcp_write(0x36, payload)  # TXB0D0
+    mcp_write(0x35, bytearray([8]))  # TXB0DLC (8 bytes)
+
+    # Request to send TXB0
+    cs.value(0)
+    spi.write(bytearray([CMD_RTS_TX0]))
+    cs.value(1)
+
+def traj_acc_dec(node_id, accel, deccel):
+    Cmd_LIMIT = CMD_ACCEL_DECEL
+    can_id = (node_id << 5) | Cmd_LIMIT
+
+    # CAN ID into TXB0SIDH/SIDL (standard ID, 11-bit)
+    sid_high = (can_id >> 3) & 0xFF
+    sid_low = (can_id & 0x07) << 5
+
+    mcp_write(0x31, bytearray([sid_high]))  # TXB0SIDH
+    mcp_write(0x32, bytearray([sid_low]))   # TXB0SIDL
+
+    # Encode the payload: 2 floats (little endian)
+    payload = struct.pack("<ff", accel, deccel)
+    mcp_write(0x36, payload)  # TXB0D0
+    mcp_write(0x35, bytearray([8]))  # TXB0DLC (8 bytes)
+
+    # Request to send TXB0
+    cs.value(0)
+    spi.write(bytearray([CMD_RTS_TX0]))
+    cs.value(1)
 
 def mcp_read_register(addr):
     cs.value(0)
@@ -82,7 +198,7 @@ def send_set_input_position(node_id, pos, vel_ff, cur_ff):
     spi.write(bytearray([CMD_RTS_TX0]))
     cs.value(1)
 
-def send_Set_Input_Vel(node_id, vel, torque):
+def send_set_input_vel(node_id, vel, torque):
     Cmd_id = 0x0D
     can_id = (node_id << 5) | Cmd_id
 
@@ -101,6 +217,44 @@ def send_Set_Input_Vel(node_id, vel, torque):
     # Request to send TXB0
     cs.value(0)
     spi.write(bytearray([CMD_RTS_TX0]))
+    cs.value(1)
+
+def send_absolute_position(node_id, position):
+    Cmd_id = 0x19
+    can_id = (node_id << 5) | Cmd_id
+
+    # CAN ID into TXB0SIDH/SIDL (standard ID, 11-bit)
+    sid_high = (can_id >> 3) & 0xFF
+    sid_low = (can_id & 0x07) << 5
+
+    mcp_write(0x31, bytearray([sid_high]))  # TXB0SIDH
+    mcp_write(0x32, bytearray([sid_low]))   # TXB0SIDL
+
+    # Encode the payload: 2 floats (little endian)
+    payload = struct.pack("<f", position)
+    mcp_write(0x36, payload)  # TXB0D0
+    mcp_write(0x35, bytearray([8]))  # TXB0DLC (8 bytes)
+
+    # Request to send TXB0
+    cs.value(0)
+    spi.write(bytearray([CMD_RTS_TX0]))
+    cs.value(1)
+
+def set_control_mode(node_id, input_mode, control_mode):
+    Cmd_id = CMD_Set_Controller_Mode
+    can_id = (node_id << 5) | Cmd_id
+
+    sid_high = (can_id >> 3) & 0xFF
+    sid_low = (can_id & 0x07) << 5
+
+    mcp_write(0x31, bytearray([sid_high]))  # TXB0SIDH
+    mcp_write(0x32, bytearray([sid_low]))   # TXB0SIDL
+
+    payload = bytearray([input_mode, control_mode])
+    mcp_write(0x36, payload + b'\x00' * (8 - 2)) #little endian
+    mcp_write(0x35, bytearray([2]))
+    cs.value(0)
+    spi.write(bytearray([0x81]))
     cs.value(1)
 
 def send_calibration_cmd(can_id):
@@ -141,17 +295,6 @@ def send_closed_loop_cmd(can_id):
     cs.value(1)
     time.sleep_ms(100)
 
-mcp_reset()
-mcp_init()
-#
-# send_calibration_cmd(CAN_ID_0)
-# send_calibration_cmd(CAN_ID_1)
-#
-# time.sleep(10)    # important for calibration
-
-send_closed_loop_cmd(CAN_ID_0)
-send_closed_loop_cmd(CAN_ID_1)
-
 def can_id(IDH, IDL, data_list):
     data = bytes(data_list)  # convert to bytes
     slave_id = (IDH >> 2)           #RXBnSIDH first 5 bits
@@ -159,7 +302,7 @@ def can_id(IDH, IDL, data_list):
     IDH_2 = (IDH & 0b00000011) << 3   #RXBnSIDH last 2 bits
     IDL_3 = (IDL >> 5)               # RXBnSIDL first 3 bytes
     CMD_ID = IDH_2 + IDL_3
-    print('CMD_ID', hex(CMD_ID))
+    # print('CMD_ID', hex(CMD_ID))
 
     if CMD_ID == 0x17:
         bus_voltage, bus_current = struct.unpack('<ff', data)
@@ -201,39 +344,71 @@ def can_id(IDH, IDL, data_list):
         print(f"Torque Target: {torque_target}")
         print(f"Torque Estimate: {torque_estimate}")
 
-
 def canintf():
-    canintf = mcp_read_register(0x2C)
+
+    canintf_reg = mcp_read_register(0x2C)
 
     # print('canintf', hex(canintf))
-    if canintf & 0x01:  # RX0IF bit set (message in RXB0)
+    if canintf_reg & 0x01:  # RX0IF bit set (message in RXB0)
         sidh = mcp_read_register(0x61)
         sidl = mcp_read_register(0x62)
         dlc = mcp_read_register(0x65)
         data = [mcp_read_register(0x66 + i) for i in range(dlc)]
         can_id(sidh, sidl, data)
-        print(f"Received: IDH={hex(sidh)}, IDL={hex(sidl)}, DLC={dlc}, Data={data}")
+        # print(f"Received: IDH={hex(sidh)}, IDL={hex(sidl)}, DLC={dlc}, Data={data}")
         # Clear TX0IF and RX0IF (bits 5 and 0)
         mcp_bit_modify(0x2C, 0x21, 0x00)
     time.sleep_ms(100)
 
+def clear_error(node_id):
+    Cmd_clear_error = CMD_CLEAR_ERROR
+    can_id = (node_id << 5) | Cmd_clear_error
+
+    # CAN ID into TXB0SIDH/SIDL (standard ID, 11-bit)
+    sid_high = (can_id >> 3) & 0xFF
+    sid_low = (can_id & 0x07) << 5
+
+    mcp_write(0x31, bytearray([sid_high]))  # TXB0SIDH
+    mcp_write(0x32, bytearray([sid_low]))  # TXB0SIDL
+
+    clear_err = [0x00, 0x00, 0x00, 0x00] + [0x00] * 4
+
+    mcp_write(0x36, clear_err)  # TXB0D0
+    mcp_write(0x35, bytearray([8]))  # TXB0DLC (8 bytes)
+
+    # Request to send TXB0
+    cs.value(0)
+    spi.write(bytearray([CMD_RTS_TX0]))
+    cs.value(1)
+
+# mcp_reset()
+mcp_init()
+
+send_calibration_cmd(CAN_ID_0)
+send_calibration_cmd(CAN_ID_1)
+
+time.sleep(10)    # important for calibration
+
+send_closed_loop_cmd(CAN_ID_0)
+send_closed_loop_cmd(CAN_ID_1)
+
+# clear_error(1)
+# clear_error(2)
 while True:
 
     send_set_input_position(0, 0.5, 0.0, 0.0)
     time.sleep_ms(10)
     send_set_input_position(1, 0.5, 0.0, 0.0)
-    print("Sending position = 0.25")
+
     time.sleep_ms(2000)
     canintf()
 
     send_set_input_position(0, 0, 0.0, 0.0)
     time.sleep_ms(10)
     send_set_input_position(1, 0, 0.0, 0.0)
-    print("Sending position = -0.25")
+
     mcp_bit_modify(0x2C, 0x01, 0x00)
     time.sleep_ms(2000)
 
-    # send_Set_Input_Vel(0, 3, 0)
-    # time.sleep(1)
     canintf()
 
