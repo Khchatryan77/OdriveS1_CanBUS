@@ -22,7 +22,7 @@ TXB0D0   = 0x36
 CMD_RTS  = 0x80  # Request to send on TXB0
 
 #odrive registers host -> odrive and odrive <- host
-CMD_VEL_LIMIT = 0x11
+CMD_TRAJ_VEL_LIMIT = 0x11
 CMD_ACCEL_DECEL = 0x12
 CMD_Traj_Inertia = 0x13
 CMD_velocity_limit = 0x0f
@@ -250,9 +250,9 @@ def set_control_mode(node_id, input_mode, control_mode):
     mcp_write(0x31, bytearray([sid_high]))  # TXB0SIDH
     mcp_write(0x32, bytearray([sid_low]))   # TXB0SIDL
 
-    payload = bytearray([input_mode, control_mode])
-    mcp_write(0x36, payload + b'\x00' * (8 - 2)) #little endian
-    mcp_write(0x35, bytearray([2]))
+    payload = struct.pack('<II', control_mode, input_mode)
+    mcp_write(0x36, payload)
+    mcp_write(0x35, bytearray([8]))
     cs.value(0)
     spi.write(bytearray([0x81]))
     cs.value(1)
@@ -381,24 +381,74 @@ def clear_error(node_id):
     spi.write(bytearray([CMD_RTS_TX0]))
     cs.value(1)
 
-# mcp_reset()
+mcp_reset()
 mcp_init()
 
 send_calibration_cmd(CAN_ID_0)
 send_calibration_cmd(CAN_ID_1)
+send_calibration_cmd(CAN_ID_2)
+# #
+time.sleep(10)          # important for calibration 10 sec
 
-time.sleep(10)    # important for calibration
+# set_control_mode(0, 0x5, 0x3)
+# time.sleep_ms(20)
+# set_control_mode(2, 0x5, 0x3)
+#
+# traj_parameter(2, CMD_TRAJ_VEL_LIMIT, 2)
+# traj_parameter(2, CMD_Traj_Inertia, 0.001)
+# traj_acc_dec(2, 2, 2)
+#
+# time.sleep_ms(10)
 
+# traj_parameter(0, CMD_TRAJ_VEL_LIMIT, 2)
+# traj_parameter(0, CMD_Traj_Inertia, 0)
+# traj_acc_dec(0, 2, 2)
+
+time.sleep_ms(20)
 send_closed_loop_cmd(CAN_ID_0)
+time.sleep_ms(20)
 send_closed_loop_cmd(CAN_ID_1)
+time.sleep_ms(20)
+send_closed_loop_cmd(CAN_ID_2)
+
+time.sleep_ms(20)
+set_control_mode(0, 0x5, 0x3)
+time.sleep_ms(20)
+set_control_mode(1, 0x5, 0x3)
+time.sleep_ms(20)
+set_control_mode(2, 0x5, 0x3)
+
+traj_parameter(2, CMD_TRAJ_VEL_LIMIT, 2)
+time.sleep_ms(20)
+traj_parameter(2, CMD_Traj_Inertia, 0.001)
+time.sleep_ms(20)
+traj_acc_dec(2, 2, 2)
+time.sleep_ms(10)
+
+traj_parameter(1, CMD_TRAJ_VEL_LIMIT, 2)
+time.sleep_ms(20)
+traj_parameter(1, CMD_Traj_Inertia, 0.001)
+time.sleep_ms(20)
+traj_acc_dec(1, 2, 2)
+
+time.sleep_ms(10)
+
+traj_parameter(0, CMD_TRAJ_VEL_LIMIT, 2)
+time.sleep_ms(20)
+traj_parameter(0, CMD_Traj_Inertia, 0)
+time.sleep_ms(20)
+traj_acc_dec(0, 2, 2)
 
 # clear_error(1)
 # clear_error(2)
+
 while True:
 
     send_set_input_position(0, 0.5, 0.0, 0.0)
     time.sleep_ms(10)
     send_set_input_position(1, 0.5, 0.0, 0.0)
+    time.sleep_ms(10)
+    send_set_input_position(2, 0.5, 0.0, 0.0)
 
     time.sleep_ms(2000)
     canintf()
@@ -406,9 +456,11 @@ while True:
     send_set_input_position(0, 0, 0.0, 0.0)
     time.sleep_ms(10)
     send_set_input_position(1, 0, 0.0, 0.0)
+    time.sleep_ms(10)
+    send_set_input_position(2, 0, 0.0, 0.0)
+
 
     mcp_bit_modify(0x2C, 0x01, 0x00)
     time.sleep_ms(2000)
 
     canintf()
-
