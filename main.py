@@ -215,9 +215,17 @@ def mcp_init():
     mcp_reset()
     # CNF1, CNF2, CNF3: Set bitrate to 500kbps with 16MHz clock
     # See MCP2515 datasheet or calculator
-    mcp_write(0x2A, bytearray([0x00]))  # CNF1
+    mcp_write(0x2A, bytearray([0x01]))  # CNF1
     mcp_write(0x29, bytearray([0x90]))  # CNF2
     mcp_write(0x28, bytearray([0x02]))  # CNF3
+
+    # suitable for longer  can and multi-node systems
+    # Total TQ = 4
+    # Bitrate = 8 MHz / (2 × 2 × 4) = 500,000 bps
+    # Each TQ = 250 ns → 1 bit = 2 µs
+    # mcp_write(0x2A, bytearray([0x01]))  # CNF1: BRP=0, SJW=1 (0b00000000)
+    # mcp_write(0x29, bytearray([0x80]))  # CNF2: BTLMODE=1, PHSEG1=5, PROPSEG=4
+    # mcp_write(0x28, bytearray([0x00]))  # CNF3: PHSEG2=5
 
     # Turn on normal mode (0x0 = Normal mode)
     mcp_bit_modify(0x0F, 0xE0, 0x00)
@@ -243,7 +251,7 @@ def send_set_input_position(node_id, pos, vel_ff, cur_ff):
     cs.value(0)
     spi.write(bytearray([CMD_RTS_TX0]))
     cs.value(1)
-    time.sleep_ms(10)
+    time.sleep_ms(30)
 
 def send_set_input_vel(node_id, vel, torque):
     Cmd_id = 0x0D
@@ -354,7 +362,7 @@ def send_closed_loop_cmd(can_id):
     cs.value(0)
     spi.write(bytearray([CMD_RTS | 0x01]))
     cs.value(1)
-    time.sleep_ms(10)
+    time.sleep_ms(20)
 
 def can_id(IDH, IDL, data_list):
     data = bytes(data_list)     # convert to bytes
@@ -446,11 +454,13 @@ def clear_error(node_id):
 
 mcp_reset()
 mcp_init()
+#
 
-send_calibration_cmd(CAN_ID_0)
+# send_calibration_cmd(CAN_ID_0)
 # send_calibration_cmd(CAN_ID_1)
 # send_calibration_cmd(CAN_ID_2)
 # send_calibration_cmd(CAN_ID_3)
+
 
 send_closed_loop_cmd(CAN_ID_0)
 send_closed_loop_cmd(CAN_ID_1)
@@ -462,49 +472,40 @@ set_control_mode(1, 0x5, 0x3)
 set_control_mode(2, 0x5, 0x3)
 set_control_mode(3, 0x5, 0x3)
 
-traj_parameter(3, CMD_TRAJ_VEL_LIMIT, 2)
+traj_parameter(3, CMD_TRAJ_VEL_LIMIT, 3)
 traj_parameter(3, CMD_Traj_Inertia, 0.001)
-traj_acc_dec(3, 2, 2)
+traj_acc_dec(3, 3, 3)
 
-traj_parameter(2, CMD_TRAJ_VEL_LIMIT, 2)
+traj_parameter(2, CMD_TRAJ_VEL_LIMIT, 3)
 
 traj_parameter(2, CMD_Traj_Inertia, 0.001)
-traj_acc_dec(2, 2, 2)
+traj_acc_dec(2, 3, 3)
 
-traj_parameter(1, CMD_TRAJ_VEL_LIMIT, 2)
+traj_parameter(1, CMD_TRAJ_VEL_LIMIT, 3)
 traj_parameter(1, CMD_Traj_Inertia, 0.001)
-traj_acc_dec(1, 2, 2)
+traj_acc_dec(1, 3, 3)
 
-traj_parameter(0, CMD_TRAJ_VEL_LIMIT, 2)
+traj_parameter(0, CMD_TRAJ_VEL_LIMIT, 3)
 traj_parameter(0, CMD_Traj_Inertia, 0.001)
-traj_acc_dec(0, 2, 2)
+traj_acc_dec(0, 3, 3)
 
 # clear_error(1)
 # clear_error(2)
 
 while True:
 
-    send_set_input_position(0, 0.5, 0.0, 0.0)
-    time.sleep_ms(10)
-    send_set_input_position(1, 0.5, 0.0, 0.0)
-    time.sleep_ms(10)
-    send_set_input_position(2, 0.5, 0.0, 0.0)
-    time.sleep_ms(10)
-    send_set_input_position(3, 0.5, 0.0, 0.0)
-
-
-    time.sleep_ms(2000)
+    send_set_input_position(0, 2, 0.0, 0.0)
+    send_set_input_position(1, -2, 0.0, 0.0)
+    send_set_input_position(2, 2, 0.0, 0.0)
+    send_set_input_position(3, -2, 0.0, 0.0)
     canintf()
+
+    time.sleep(1)
 
     send_set_input_position(0, 0, 0.0, 0.0)
-    time.sleep_ms(10)
     send_set_input_position(1, 0, 0.0, 0.0)
-    time.sleep_ms(10)
     send_set_input_position(2, 0, 0.0, 0.0)
-    time.sleep_ms(10)
     send_set_input_position(3, 0, 0.0, 0.0)
-
-    mcp_bit_modify(0x2C, 0x01, 0x00)
-    time.sleep_ms(2000)
-
     canintf()
+
+    time.sleep(1)
