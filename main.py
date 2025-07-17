@@ -2,6 +2,8 @@ from machine import Pin, SPI
 import time
 import struct
 
+running = True
+
 # MCP2515 Commands
 CMD_RESET = 0xC0
 CMD_WRITE = 0x02
@@ -77,6 +79,40 @@ cs = Pin(13, Pin.OUT)
 spi = SPI(1, sck=Pin(10), mosi=Pin(11), miso=Pin(12), baudrate=500000)
 cs.value(1)
 
+nodes = {
+    0: {"encoder": {"position": 0.0, "velocity": 0.0}},
+    1: {"encoder": {"position": 0.0, "velocity": 0.0}},
+    2: {"encoder": {"position": 0.0, "velocity": 0.0}},
+    3: {"encoder": {"position": 0.0, "velocity": 0.0}},
+}
+
+# Initial flags
+trajectory_done_flag = {
+    0: False,
+    1: False,
+    2: False,
+    3: False,
+}
+
+def update_trajectory_done_flag(node_id, flag_value):
+    if flag_value not in (0, 1):
+        print(f"Error: flag_value must be 0 or 1, got {flag_value}")
+        return
+
+    if node_id in trajectory_done_flag:
+         trajectory_done_flag[node_id] = flag_value
+    else:
+        print(f"Error: Node ID {node_id} not found.")
+
+def update_nodes(nodes, node_id, encoder):
+    if not isinstance(encoder, dict):
+        print(f"Error: encoder must be a dict, got {type(encoder)}")
+        return
+    if node_id in nodes:
+        nodes[node_id]["encoder"]['position'] = encoder["position"]
+        nodes[node_id]["encoder"]['velocity'] = encoder["velocity"]
+    else:
+        print(f"Node {node_id} not found.")
 
 def velocity_gain(node_id, vel_gain, vel_integer_gain):
     Cmd_vel_gain = CMD_Velocity_Gain
@@ -214,20 +250,19 @@ def mcp_bit_modify(addr, mask, data):
 def mcp_init():
     mcp_reset()
     # CNF1, CNF2, CNF3: Set bitrate to 500kbps with 16MHz clock
-    # See MCP2515 datasheet or calculator
-    mcp_write(0x2A, bytearray([0x01]))  # CNF1
-    mcp_write(0x29, bytearray([0x90]))  # CNF2
-    mcp_write(0x28, bytearray([0x02]))  # CNF3
 
-    # suitable for longer  can and multi-node systems
-    # Total TQ = 4
-    # Bitrate = 8 MHz / (2 × 2 × 4) = 500,000 bps
-    # Each TQ = 250 ns → 1 bit = 2 µs
-    # mcp_write(0x2A, bytearray([0x01]))  # CNF1: BRP=0, SJW=1 (0b00000000)
-    # mcp_write(0x29, bytearray([0x80]))  # CNF2: BTLMODE=1, PHSEG1=5, PROPSEG=4
-    # mcp_write(0x28, bytearray([0x00]))  # CNF3: PHSEG2=5
+    # mcp_write(0x2A, bytearray([0x01]))  # CNF1
+    # mcp_write(0x29, bytearray([0x90]))  # CNF2
+    # mcp_write(0x28, bytearray([0x02]))  # CNF3
+
+    # suitable for longer  can and multi-node systems 500kbps
+
+    mcp_write(0x2A, bytearray([0x01]))  # CNF1: BRP=0, SJW=1 (0b00000000)
+    mcp_write(0x29, bytearray([0x80]))  # CNF2: BTLMODE=1, PHSEG1=5, PROPSEG=4
+    mcp_write(0x28, bytearray([0x00]))  # CNF3: PHSEG2=5
 
     # Turn on normal mode (0x0 = Normal mode)
+
     mcp_bit_modify(0x0F, 0xE0, 0x00)
     time.sleep_us(100)
 
@@ -367,11 +402,12 @@ def send_closed_loop_cmd(can_id):
 def can_id(IDH, IDL, data_list):
     data = bytes(data_list)     # convert to bytes
     slave_id = (IDH >> 2)           #RXBnSIDH first 5 bits
-    print('slave_id', slave_id)
+    # print('slave_id', slave_id)
     IDH_2 = (IDH & 0b00000011) << 3   #RXBnSIDH last 2 bits
     IDL_3 = (IDL >> 5)               # RXBnSIDL first 3 bytes
     CMD_ID = IDH_2 + IDL_3
     # print('CMD_ID', hex(CMD_ID))
+
 
     if CMD_ID == 0x17:
         bus_voltage, bus_current = struct.unpack('<ff', data)
@@ -396,16 +432,13 @@ def can_id(IDH, IDL, data_list):
     if CMD_ID == 0x09:
         position = struct.unpack('<f', data[:4])[0]  # Decode first 4 bytes as float (position)
         velocity = struct.unpack('<f', data[4:])[0]  # Decode next 4 bytes as float (velocity)
-        print("Position:", position)
-        print("Velocity:", velocity)
-
-    if CMD_ID == 0x01:   # Heartbeat
-        axis_error, axis_state, proc_result, traj_done_flag = struct.unpack('<HBBI', data)
-
-        print("Axis Error:", axis_error)
-        print("Axis State:", axis_state)
-        print("Procedure Result:", proc_result)
-        print("Trajectory Done Flag:", traj_done_flag)
+        # print("Position:", position)
+        # print("Velocity:", velocity)
+        encoder = {
+            "position": position,
+            "velocity": velocity,
+        }
+        return slave_id, encoder
 
     if CMD_ID == 0x1c:
         torque_target, torque_estimate = struct.unpack('<ff', data)
@@ -413,20 +446,84 @@ def can_id(IDH, IDL, data_list):
         print(f"Torque Target: {torque_target}")
         print(f"Torque Estimate: {torque_estimate}")
 
+def heartbeat(IDH, IDL, data_list):
+    data = bytes(data_list)  # convert to bytes
+    slave_id = (IDH >> 2)  # RXBnSIDH first 5 bits
+    # print('slave_id', slave_id)
+    IDH_2 = (IDH & 0b00000011) << 3  # RXBnSIDH last 2 bits
+    IDL_3 = (IDL >> 5)  # RXBnSIDL first 3 bytes
+    CMD_ID = IDH_2 + IDL_3
+    # print('CMD_ID', hex(CMD_ID))
+    if CMD_ID == 0x01:   # Heartbeat
+        # axis_error, axis_state, proc_result, traj_done_flag = struct.unpack('<HBBI', data)
+        axis_error, axis_state, proc_result, traj_done_flag = struct.unpack('<IBBH', data)
+        # print("Axis Error:", axis_error)
+        # print("Axis State:", axis_state)
+        # print("Procedure Result:", proc_result)
+        print("Trajectory Done Flag:", traj_done_flag)
+        print("slave_id", slave_id)
+
+        return slave_id, traj_done_flag
+
 def canintf():
 
     canintf_reg = mcp_read_register(0x2C)
 
     # print('canintf', hex(canintf))
     if canintf_reg & 0x01:  # RX0IF bit set (message in RXB0)
-        sidh = mcp_read_register(0x61)
-        sidl = mcp_read_register(0x62)
-        dlc = mcp_read_register(0x65)
-        data = [mcp_read_register(0x66 + i) for i in range(dlc)]
-        can_id(sidh, sidl, data)
-        # print(f"Received: IDH={hex(sidh)}, IDL={hex(sidl)}, DLC={dlc}, Data={data}")
-        # Clear TX0IF and RX0IF (bits 5 and 0)
-        mcp_bit_modify(0x2C, 0x21, 0x00)
+        sidh = mcp_read_register(RXB0SIDH)
+        sidl = mcp_read_register(RXB0SIDL)
+        dlc = mcp_read_register(RXB0DLC)
+        data = [mcp_read_register(RXB0Dm + i) for i in range(dlc)]
+        # slave_id, position = can_id(sidh, sidl, data)
+        result = can_id(sidh, sidl, data)
+
+        if result is not None:
+            slave_id, encoder = result
+
+
+            return slave_id, encoder
+
+        mcp_bit_modify(0x2C, 0x21, 0x00)          # Clear TX0IF and RX0IF (bits 5 and 0)
+
+        # result_2 = heartbeat(sidh, sidl, data)
+        # if result_2 is not None:
+        #     slave_id, traj_flag = result_2
+        #
+        #     return slave_id, traj_flag
+        #
+        # mcp_bit_modify(0x2C, 0x21, 0x00)          # Clear TX0IF and RX0IF (bits 5 and 0)
+
+    # if canintf_reg & 0x02:  # RX1IF bit set (message in RXB1)
+    #     sidh = mcp_read_register(RXB1SIDH)
+    #     sidl = mcp_read_register(RXB1SIDL)
+    #     dlc = mcp_read_register(RXB1DLC)
+    #     data = [mcp_read_register(RXB1Dm + i) for i in range(dlc)]
+    #     # slave_id, position = can_id(sidh, sidl, data)
+    #     result2 = can_id(sidh, sidl, data)
+    #     print('result2', result2)
+    #     mcp_bit_modify(0x2C, 0x02, 0x00)
+    #
+    time.sleep_ms(20)
+
+def canintf1():
+
+    canintf_reg = mcp_read_register(0x2C)
+
+    # print('canintf', hex(canintf))
+    if canintf_reg & 0x01:  # RX0IF bit set (message in RXB0)
+        sidh = mcp_read_register(RXB0SIDH)
+        sidl = mcp_read_register(RXB0SIDL)
+        dlc = mcp_read_register(RXB0DLC)
+        data = [mcp_read_register(RXB0Dm + i) for i in range(dlc)]
+
+        result_2 = heartbeat(sidh, sidl, data)
+        if result_2 is not None:
+            slave_id, traj_flag = result_2
+
+            return slave_id, traj_flag
+
+        mcp_bit_modify(0x2C, 0x21, 0x00)          # Clear TX0IF and RX0IF (bits 5 and 0)
 
     time.sleep_ms(20)
 
@@ -454,7 +551,7 @@ def clear_error(node_id):
 
 mcp_reset()
 mcp_init()
-#
+
 
 # send_calibration_cmd(CAN_ID_0)
 # send_calibration_cmd(CAN_ID_1)
@@ -493,19 +590,88 @@ traj_acc_dec(0, 3, 3)
 # clear_error(2)
 
 while True:
+    #
+    # heartbeat1 = canintf1()
+    # if heartbeat1 is not None:
+    #     node_id, traj_flag = heartbeat1
+    #     update_trajectory_done_flag(node_id, traj_flag)
+    #
+    #     print(f"trajectory_done_flag_0 = {trajectory_done_flag[0]}")
+    #     print(f"trajectory_done_flag_1 = {trajectory_done_flag[1]}")
+    #     print(f"trajectory_done_flag_2 = {trajectory_done_flag[2]}")
+    #     print(f"trajectory_done_flag_3 = {trajectory_done_flag[3]}")
+    #
+    #
+    #     for node_id, flag in trajectory_done_flag.items():  # for printing
+    #         print(f"Node {node_id}: Trajectory Done = {flag}")
+    #
+    #     mcp_bit_modify(0x2C, 0x21, 0x00)
 
-    send_set_input_position(0, 2, 0.0, 0.0)
-    send_set_input_position(1, -2, 0.0, 0.0)
-    send_set_input_position(2, 2, 0.0, 0.0)
-    send_set_input_position(3, -2, 0.0, 0.0)
-    canintf()
+    Packet = canintf()
+    if Packet is not None:
+        Node_id, encoder = Packet
+        update_nodes(nodes, Node_id, encoder)
 
-    time.sleep(1)
+        # for node_id, info in nodes.items():
+        #     enc = info["encoder"]
+        #     print(f"Node {node_id}: Position = {enc['position']}, Velocity = {enc['velocity']}")
 
-    send_set_input_position(0, 0, 0.0, 0.0)
-    send_set_input_position(1, 0, 0.0, 0.0)
-    send_set_input_position(2, 0, 0.0, 0.0)
-    send_set_input_position(3, 0, 0.0, 0.0)
-    canintf()
+        position_0 = round(nodes[0]["encoder"]["position"], 0)
+        position_1 = round(nodes[1]["encoder"]["position"], 0)
+        position_2 = round(nodes[2]["encoder"]["position"], 0)
+        position_3 = round(nodes[3]["encoder"]["position"], 0)
 
-    time.sleep(1)
+        print('position_0', position_0)
+        print('position_1', position_1)
+        print('position_2', position_2)
+        print('position_3', position_3)
+        mcp_bit_modify(0x2C, 0x21, 0x00)
+
+        send_set_input_position(0, 20, 0.0, 0.0)  # left front motor
+        send_set_input_position(1, -20, 0.0, 0.0)  # right front motor
+        send_set_input_position(2, 20, 0.0, 0.0)  # left back motor
+        send_set_input_position(3, -20, 0.0, 0.0)  # right back motor
+        print('go to loop')
+
+        if (position_0 == 20 and position_1 == -20 and position_2 == 20 and position_3 == -20):
+            done = False
+            while (not done) and position_0 !=0: #and position_1 !=0 and position_2 !=0 and position_3 != 0
+                send_set_input_position(0, 0, 0.0, 0.0)
+                send_set_input_position(1, 0, 0.0, 0.0)
+                send_set_input_position(2, 0, 0.0, 0.0)
+                send_set_input_position(3, 0, 0.0, 0.0)
+
+                # heartbeat1 = canintf1()
+                # if heartbeat1 is not None:
+                #     node_id, traj_flag = heartbeat1
+                #     update_trajectory_done_flag(node_id, traj_flag)
+
+                    # for node_id, flag in trajectory_done_flag.items():  # for printing
+                    #     print(f"Node {node_id}: Trajectory Done = {flag}")
+
+                Packet = canintf()
+                if Packet is not None:
+                    Node_id, encoder = Packet
+                    update_nodes(nodes, Node_id, encoder)
+
+                    # for node_id, info in nodes.items():
+                    #     enc = info["encoder"]
+                    #     print(f"Node {node_id}: Position = {enc['position']}, Velocity = {enc['velocity']}")
+
+                    position_0 = round(nodes[0]["encoder"]["position"], 0)
+                    position_1 = round(nodes[1]["encoder"]["position"], 0)
+                    position_2 = round(nodes[2]["encoder"]["position"], 0)
+                    position_3 = round(nodes[3]["encoder"]["position"], 0)
+
+
+                    if (
+                            position_0 == 0 and
+                            position_1 == 0 and
+                            position_2 == 0 and
+                            position_3 == 0
+                    ):
+                        done = True
+                mcp_bit_modify(0x2C, 0x21, 0x00)
+
+                # if all(trajectory_done_flag[i] == 1 for i in range(4)):
+                #     done = True
